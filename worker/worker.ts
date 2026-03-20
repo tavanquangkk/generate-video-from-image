@@ -5,7 +5,7 @@ import path from 'path';
 import { exec } from 'child_process';
 import util from 'util';
 import axios from 'axios';
-import ExifParser from 'exif-parser';
+import * as ExifParser from 'exif-parser';
 
 const execPromise = util.promisify(exec);
 const connection = new IORedis(process.env.REDIS_HOST || 'localhost', { maxRetriesPerRequest: null });
@@ -30,7 +30,7 @@ const worker = new Worker('video_jobs', async job => {
         
         // Extract EXIF
         const buffer = fs.readFileSync(imagePath);
-        const parser = ExifParser.create(buffer);
+        const parser = (ExifParser as any).create(buffer);
         const exif = parser.parse();
         
         const iso = exif.tags.ISO || '?';
