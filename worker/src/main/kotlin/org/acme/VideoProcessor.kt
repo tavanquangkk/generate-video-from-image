@@ -28,17 +28,18 @@ class VideoProcessor {
             val overlayText = metadata.toOverlayText()
             
             val clipPath = "${tempDir.absolutePath}/clip_$index.mp4"
+            val duration = job.options.durationPerImage
             
-            // Create a short clip for each image with text overlay
-            // -loop 1: repeat image
-            // -t: duration
-            // drawtext filter: ISO | f/ | Shutter ...
+            // Stylish Improvements:
+            // 1. Zoompan (Ken Burns Effect): slow zoom in
+            // 2. Fade: fade in and fade out
+            // 3. Drawtext: adjusted positioning and styling
             val ffmpegCmd = listOf(
                 "ffmpeg", "-y",
                 "-loop", "1", "-i", imagePath,
-                "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,drawtext=text='$overlayText':x=w-tw-50:y=h-th-50:fontsize=36:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10",
-                "-c:v", "libx264", "-t", job.options.durationPerImage.toString(),
-                "-pix_fmt", "yuv420p",
+                "-vf", "scale=8000:-1,zoompan=z='min(zoom+0.0015,1.5)':d=${duration * 25}:s=1920x1080:fps=25,fade=t=in:st=0:d=1,fade=t=out:st=${duration - 1}:d=1,drawtext=text='$overlayText':x=60:y=h-th-60:fontsize=32:fontcolor=white@0.8:box=1:boxcolor=black@0.3:boxborderw=15",
+                "-c:v", "libx264", "-t", duration.toString(),
+                "-pix_fmt", "yuv420p", "-r", "25",
                 clipPath
             )
             
@@ -50,14 +51,32 @@ class VideoProcessor {
         val concatListPath = "${tempDir.absolutePath}/concat_list.txt"
         File(concatListPath).writeText(videoClips.joinToString("\n") { "file '$it'" })
 
-        val finalOutput = "${outputDir.absolutePath}/video_$jobId.mp4"
+        val intermediateOutput = "${tempDir.absolutePath}/no_music.mp4"
         val concatCmd = listOf(
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0", "-i", concatListPath,
             "-c", "copy",
-            finalOutput
+            intermediateOutput
         )
         runCommand(concatCmd)
+
+        // Final step: Add BGM if requested and available
+        val finalOutput = "${outputDir.absolutePath}/video_$jobId.mp4"
+        val bgmFile = File("$storagePath/music/background.mp3")
+        
+        if (job.options.music && bgmFile.exists()) {
+            val musicCmd = listOf(
+                "ffmpeg", "-y",
+                "-i", intermediateOutput,
+                "-stream_loop", "-1", "-i", bgmFile.absolutePath,
+                "-map", "0:v", "-map", "1:a",
+                "-c:v", "copy", "-c:a", "aac", "-shortest",
+                finalOutput
+            )
+            runCommand(musicCmd)
+        } else {
+            File(intermediateOutput).copyTo(File(finalOutput), overwrite = true)
+        }
 
         // Cleanup
         tempDir.deleteRecursively()
