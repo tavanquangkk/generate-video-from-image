@@ -1,0 +1,27 @@
+services:
+  api-server:
+    build: .
+    container_name: gen-video-api
+    ports:
+      - "3000:3000"
+    volumes:
+      - "./outputs:/app/outputs"
+      - "./watch-folder:/app/uploads"
+    environment:
+      - OUTPUT_DIR=/app/outputs
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-automation
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - "./watch-folder:/data/watch"
+    environment:
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
+    depends_on:
+      - api-server
+
+volumes:
+  n8n_data:

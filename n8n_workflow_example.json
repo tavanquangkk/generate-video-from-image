@@ -1,0 +1,74 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "folderToWatch": "/data/watch",
+        "event": "add",
+        "options": {
+          "ignoreInitial": true
+        }
+      },
+      "id": "file-trigger",
+      "name": "Local File Trigger",
+      "type": "n8n-nodes-base.localFileTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "fileOperation": "read",
+        "filePath": "={{$node[\"Local File Trigger\"].json[\"path\"]}}"
+      },
+      "id": "read-file",
+      "name": "Read Binary File",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api-server:3000/api/v1/create-video",
+        "sendBinaryData": true,
+        "binaryPropertyName": "data",
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "fileName",
+              "value": "={{$node[\"Local File Trigger\"].json[\"fileName\"]}}"
+            }
+          ]
+        }
+      },
+      "id": "http-request",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [650, 300]
+    }
+  ],
+  "connections": {
+    "Local File Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Binary File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Binary File": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -12,9 +12,9 @@ const port = 3000;
 
 // Setup directories
 const UPLOADS_DIR = 'uploads';
-const OUTPUT_DIR = 'outputs';
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
-if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR);
+const OUTPUT_DIR = process.env.OUTPUT_DIR || 'outputs';
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
@@ -28,9 +28,10 @@ app.post('/api/v1/create-video', upload.single('photo'), async (req, res) => {
     return res.status(400).json({ error: 'Please upload a photo.' });
   }
 
+  const customFileName = req.body.fileName || uuidv4();
   const photoPath = req.file.path;
   const videoId = uuidv4();
-  const outputVideoPath = path.join(OUTPUT_DIR, `${videoId}.mp4`);
+  const outputVideoPath = path.join(OUTPUT_DIR, `${customFileName}.mp4`);
   const overlayPath = path.join(UPLOADS_DIR, `${videoId}_overlay.png`);
 
   try {
@@ -136,7 +137,8 @@ app.post('/api/v1/create-video', upload.single('photo'), async (req, res) => {
         res.json({
           message: 'Video created successfully',
           videoId,
-          videoUrl: `/outputs/${videoId}.mp4`,
+          fileName: `${customFileName}.mp4`,
+          videoUrl: `/outputs/${customFileName}.mp4`,
           metadata: { cameraName, lensInfo, iso, aperture, shutterSpeed }
         });
       })
