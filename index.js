@@ -30,13 +30,19 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
         return res.status(400).json({ error: "Please upload a photo." });
     }
 
-    const customFileName = req.body.fileName || uuidv4();
+    let customFileName = req.body.fileName || uuidv4();
+    if (customFileName.toLowerCase().endsWith(".mp4")) {
+        customFileName = customFileName.slice(0, -4);
+    }
+    
     const photoPath = req.file.path;
     const videoId = uuidv4();
     const outputVideoPath = path.join(OUTPUT_DIR, `${customFileName}.mp4`);
     const overlayPath = path.join(UPLOADS_DIR, `${videoId}_overlay.png`);
 
     try {
+        console.log(`[DEBUG] Starting processing for photo: ${photoPath}`);
+
         // 0. Pick Random Music
         const musicFiles = fs.readdirSync(MUSIC_DIR).filter((file) =>
             [".mp3", ".wav", ".m4a"].includes(path.extname(file).toLowerCase()),
@@ -45,7 +51,7 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
         if (musicFiles.length > 0) {
             const randomMusic = musicFiles[Math.floor(Math.random() * musicFiles.length)];
             musicPath = path.join(MUSIC_DIR, randomMusic);
-            console.log(`Using music: ${randomMusic}`);
+            console.log(`[DEBUG] Music selected: ${randomMusic}`);
         }
 
         // 1. Extract EXIF
@@ -56,18 +62,16 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
         const aperture = tags.Aperture || tags.FNumber || "N/A";
         const shutterSpeed = tags.ShutterSpeed || tags.ExposureTime || "N/A";
 
-        // 2. Create Stylish Overlay
-        const img = await loadImage(photoPath);
-        const canvas = createCanvas(img.width, img.height);
+        // 2. Create Stylish Overlay (Fixed 1920x1080)
+        console.log(`[DEBUG] Creating overlay at 1920x1080`);
+        const canvas = createCanvas(1920, 1080);
         const ctx = canvas.getContext("2d");
 
-        // Draw nothing for background (transparent)
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, 1920, 1080);
 
-        // Stylish Typography at bottom-left
         const padding = 60;
-        const fontSizeMain = Math.floor(canvas.height * 0.05);
-        const fontSizeSub = Math.floor(canvas.height * 0.025);
+        const fontSizeMain = 60;
+        const fontSizeSub = 30;
 
         ctx.shadowBlur = 10;
         ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
@@ -78,62 +82,67 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
         ctx.fillText(
             cameraName.toUpperCase(),
             padding,
-            canvas.height - padding - fontSizeSub * 2.5,
+            1080 - padding - fontSizeSub * 2.5,
         );
 
         // Lens & Settings
         ctx.font = `${fontSizeSub}px Helvetica`;
-        ctx.fillText(`${lensInfo}`, padding, canvas.height - padding - fontSizeSub * 1.2);
+        ctx.fillText(`${lensInfo}`, padding, 1080 - padding - fontSizeSub * 1.2);
         ctx.fillText(
             `ISO ${iso} | f/${aperture} | ${shutterSpeed}s`,
             padding,
-            canvas.height - padding,
+            1080 - padding,
         );
 
-        // Optional: Add a subtle vignette in the overlay
-        const gradient = ctx.createRadialGradient(
-            canvas.width / 2,
-            canvas.height / 2,
-            0,
-            canvas.width / 2,
-            canvas.height / 2,
-            canvas.width,
-        );
+        // Subtle vignette
+        const gradient = ctx.createRadialGradient(960, 540, 0, 960, 540, 1100);
         gradient.addColorStop(0, "rgba(0,0,0,0)");
         gradient.addColorStop(1, "rgba(0,0,0,0.4)");
         ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, 1920, 1080);
 
         const buffer = canvas.toBuffer("image/png");
         fs.writeFileSync(overlayPath, buffer);
 
-        // 3. Create Video with FFmpeg (Zoom effect + Overlay + Music)
+        // 3. Create Video with FFmpeg
+        console.log(`[DEBUG] Initializing FFmpeg...`);
         let ffmpegCommand = ffmpeg();
-        
-        // Input 0: Photo
+
         ffmpegCommand = ffmpegCommand.input(photoPath).loop(5);
-        
-        // Input 1: Overlay
         ffmpegCommand = ffmpegCommand.input(overlayPath);
 
-        // Input 2: Music or Silence
         if (musicPath) {
             ffmpegCommand = ffmpegCommand.input(musicPath);
-            console.log(`[DEBUG] Adding music input: ${musicPath}`);
-        } else {
-            // Generate 5 seconds of silence if no music
-            ffmpegCommand = ffmpegCommand.input("anullsrc=channel_layout=stereo:sample_rate=44100").inputFormat("lavfi");
-            console.log(`[DEBUG] No music found, adding silent audio`);
+        }
+
+        const outputOptions = [
+            "-map [v_out]",
+            "-c:v libx264",
+            "-pix_fmt yuv420p",
+            "-movflags +faststart"
+        ];
+
+        if (musicPath) {
+            outputOptions.push("-map 2:a");
+            outputOptions.push("-c:a aac");
+            outputOptions.push("-b:a 192k");
+            outputOptions.push("-shortest");
         }
 
         ffmpegCommand
             .complexFilter([
-                // Layer 0: Original Photo with zoompan
+                // Photo: scale to 3840 (double 1920) for quality, then crop to 16:9, then zoompan
                 {
                     filter: "scale",
-                    options: "3840:-1",
+                    options: "3840:2160:force_original_aspect_ratio=increase",
                     inputs: "0",
                     outputs: "scaled",
+                },
+                {
+                    filter: "crop",
+                    options: "3840:2160",
+                    inputs: "scaled",
+                    outputs: "cropped",
                 },
                 {
                     filter: "zoompan",
@@ -145,36 +154,27 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
                         x: "iw/2-(iw/zoom/2)",
                         y: "ih/2-(ih/zoom/2)",
                     },
-                    inputs: "scaled",
+                    inputs: "cropped",
                     outputs: "zoomed",
                 },
-                // Layer 1: Overlay
-                {
-                    filter: "scale",
-                    options: "1920:1080",
-                    inputs: "1",
-                    outputs: "overlay_scaled",
-                },
-                // Merge
+                // Merge with Overlay
                 {
                     filter: "overlay",
-                    inputs: ["zoomed", "overlay_scaled"],
+                    inputs: ["zoomed", "1"],
                     outputs: "v_out",
                 },
             ])
-            .outputOptions("-map [v_out]") // Map video from complex filter
-            .outputOptions("-map 2:a")     // Map audio from Input 2 (Music or Silence)
-            .videoCodec("libx264")
-            .audioCodec("aac")
-            .outputOptions("-pix_fmt yuv420p")
-            .outputOptions("-shortest")
+            .outputOptions(outputOptions)
             .fps(25)
-            .save(outputVideoPath)
+            .on("start", (commandLine) => {
+                console.log(`[DEBUG] Executing FFmpeg: ${commandLine}`);
+            })
+            .on("stderr", (stderrLine) => {
+                console.log(`[FFMPEG] ${stderrLine}`);
+            })
             .on("end", () => {
-                // Xóa overlay tạm
+                console.log(`[DEBUG] FFmpeg finished successfully.`);
                 if (fs.existsSync(overlayPath)) fs.unlinkSync(overlayPath);
-
-                // Xóa luôn ảnh gốc sau khi đã tạo video xong (để tránh lặp file)
                 if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
                 res.json({
                     message: "Video created successfully",
@@ -186,14 +186,14 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
                 });
             })
             .on("error", (err) => {
-                // QUAN TRỌNG: Nếu lỗi cũng phải xóa ảnh để không bị rác
+                console.error(`[DEBUG] FFmpeg Error: ${err.message}`);
                 if (fs.existsSync(overlayPath)) fs.unlinkSync(overlayPath);
                 if (fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
-                console.error(err);
                 res.status(500).json({ error: "Video generation failed." });
-            });
+            })
+            .save(outputVideoPath);
     } catch (error) {
-        console.error(error);
+        console.error(`[DEBUG] Unexpected Error: ${error.message}`);
         res.status(500).json({ error: "An error occurred during processing." });
     }
 });
