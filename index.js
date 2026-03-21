@@ -116,12 +116,14 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
         // Input 1: Overlay
         ffmpegCommand = ffmpegCommand.input(overlayPath);
 
-        // Input 2: Music (optional)
+        // Input 2: Music or Silence
         if (musicPath) {
             ffmpegCommand = ffmpegCommand.input(musicPath);
-            console.log(`[DEBUG] Music detected: ${musicPath}`);
+            console.log(`[DEBUG] Adding music input: ${musicPath}`);
         } else {
-            console.log(`[DEBUG] No music files found in ${MUSIC_DIR}`);
+            // Generate 5 seconds of silence if no music
+            ffmpegCommand = ffmpegCommand.input("anullsrc=channel_layout=stereo:sample_rate=44100").inputFormat("lavfi");
+            console.log(`[DEBUG] No music found, adding silent audio`);
         }
 
         ffmpegCommand
@@ -160,20 +162,13 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
                     outputs: "v_out",
                 },
             ])
-            .outputOptions("-map [v_out]") // Map video from filter
+            .outputOptions("-map [v_out]") // Map video from complex filter
+            .outputOptions("-map 2:a")     // Map audio from Input 2 (Music or Silence)
             .videoCodec("libx264")
+            .audioCodec("aac")
             .outputOptions("-pix_fmt yuv420p")
-            .fps(25);
-
-        if (musicPath) {
-            // Map audio from input 2 (music)
-            ffmpegCommand = ffmpegCommand
-                .outputOptions("-map 2:a")
-                .audioCodec("aac")
-                .outputOptions("-shortest");
-        }
-
-        ffmpegCommand
+            .outputOptions("-shortest")
+            .fps(25)
             .save(outputVideoPath)
             .on("end", () => {
                 // Xóa overlay tạm
