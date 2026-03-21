@@ -108,14 +108,20 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
         fs.writeFileSync(overlayPath, buffer);
 
         // 3. Create Video with FFmpeg (Zoom effect + Overlay + Music)
-        let ffmpegCommand = ffmpeg()
-            .input(photoPath)
-            .loop(5) // 5 seconds
-            .input(overlayPath);
+        let ffmpegCommand = ffmpeg();
+        
+        // Input 0: Photo
+        ffmpegCommand = ffmpegCommand.input(photoPath).loop(5);
+        
+        // Input 1: Overlay
+        ffmpegCommand = ffmpegCommand.input(overlayPath);
 
+        // Input 2: Music (optional)
         if (musicPath) {
             ffmpegCommand = ffmpegCommand.input(musicPath);
-            console.log(`Adding audio input from: ${musicPath}`);
+            console.log(`[DEBUG] Music detected: ${musicPath}`);
+        } else {
+            console.log(`[DEBUG] No music files found in ${MUSIC_DIR}`);
         }
 
         ffmpegCommand
@@ -151,17 +157,18 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
                 {
                     filter: "overlay",
                     inputs: ["zoomed", "overlay_scaled"],
-                    outputs: "final",
+                    outputs: "v_out",
                 },
             ])
-            .map("final") // Map video from complex filter
+            .outputOptions("-map [v_out]") // Map video from filter
             .videoCodec("libx264")
             .outputOptions("-pix_fmt yuv420p")
             .fps(25);
 
         if (musicPath) {
+            // Map audio from input 2 (music)
             ffmpegCommand = ffmpegCommand
-                .map("2:a") // Map audio from 3rd input (index 2)
+                .outputOptions("-map 2:a")
                 .audioCodec("aac")
                 .outputOptions("-shortest");
         }
