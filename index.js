@@ -115,6 +115,7 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
 
         if (musicPath) {
             ffmpegCommand = ffmpegCommand.input(musicPath);
+            console.log(`Adding audio input from: ${musicPath}`);
         }
 
         ffmpegCommand
@@ -153,13 +154,16 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
                     outputs: "final",
                 },
             ])
-            .map("final")
+            .map("final") // Map video from complex filter
             .videoCodec("libx264")
             .outputOptions("-pix_fmt yuv420p")
             .fps(25);
 
         if (musicPath) {
-            ffmpegCommand = ffmpegCommand.map("2:a").outputOptions("-shortest");
+            ffmpegCommand = ffmpegCommand
+                .map("2:a") // Map audio from 3rd input (index 2)
+                .audioCodec("aac")
+                .outputOptions("-shortest");
         }
 
         ffmpegCommand
