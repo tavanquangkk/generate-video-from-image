@@ -13,8 +13,10 @@ const port = 3000;
 // Setup directories
 const UPLOADS_DIR = "uploads";
 const OUTPUT_DIR = process.env.OUTPUT_DIR || "outputs";
+const MUSIC_DIR = "music";
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+if (!fs.existsSync(MUSIC_DIR)) fs.mkdirSync(MUSIC_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, UPLOADS_DIR),
@@ -35,6 +37,17 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
     const overlayPath = path.join(UPLOADS_DIR, `${videoId}_overlay.png`);
 
     try {
+        // 0. Pick Random Music
+        const musicFiles = fs.readdirSync(MUSIC_DIR).filter((file) =>
+            [".mp3", ".wav", ".m4a"].includes(path.extname(file).toLowerCase()),
+        );
+        let musicPath = null;
+        if (musicFiles.length > 0) {
+            const randomMusic = musicFiles[Math.floor(Math.random() * musicFiles.length)];
+            musicPath = path.join(MUSIC_DIR, randomMusic);
+            console.log(`Using music: ${randomMusic}`);
+        }
+
         // 1. Extract EXIF
         const tags = await exiftool.read(photoPath);
         const cameraName = tags.Model || "Unknown Camera";
@@ -94,15 +107,19 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
         const buffer = canvas.toBuffer("image/png");
         fs.writeFileSync(overlayPath, buffer);
 
-        // 3. Create Video with FFmpeg (Zoom effect + Overlay)
-        // Scale image to a reasonable size if too large (e.g. 1920x1080)
-        ffmpeg()
+        // 3. Create Video with FFmpeg (Zoom effect + Overlay + Music)
+        let ffmpegCommand = ffmpeg()
             .input(photoPath)
             .loop(5) // 5 seconds
-            .input(overlayPath)
+            .input(overlayPath);
+
+        if (musicPath) {
+            ffmpegCommand = ffmpegCommand.input(musicPath);
+        }
+
+        ffmpegCommand
             .complexFilter([
                 // Layer 0: Original Photo with zoompan
-                // d=125 (5s * 25fps), zoom in from 1.0 to 1.1
                 {
                     filter: "scale",
                     options: "3840:-1",
@@ -139,7 +156,13 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
             .map("final")
             .videoCodec("libx264")
             .outputOptions("-pix_fmt yuv420p")
-            .fps(25)
+            .fps(25);
+
+        if (musicPath) {
+            ffmpegCommand = ffmpegCommand.map("2:a").outputOptions("-shortest");
+        }
+
+        ffmpegCommand
             .save(outputVideoPath)
             .on("end", () => {
                 // Xóa overlay tạm
@@ -153,6 +176,7 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
                     fileName: `${customFileName}.mp4`,
                     videoUrl: `/outputs/${customFileName}.mp4`,
                     metadata: { cameraName, lensInfo, iso, aperture, shutterSpeed },
+                    musicUsed: musicPath ? path.basename(musicPath) : "none",
                 });
             })
             .on("error", (err) => {
