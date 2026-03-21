@@ -33,7 +33,7 @@ app.post("/api/v1/create-video", upload.single("photo"), async (req, res) => {
     const customFileName = req.body.fileName || uuidv4();
     const photoPath = req.file.path;
     const videoId = uuidv4();
-    const outputVideoPath = path.join(OUTPUT_DIR, `latest_production.mp4`);
+    const outputVideoPath = path.join(OUTPUT_DIR, `${customFileName}.mp4`);
     const overlayPath = path.join(UPLOADS_DIR, `${videoId}_overlay.png`);
 
     try {
